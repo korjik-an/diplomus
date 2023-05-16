@@ -12,7 +12,6 @@ def train_model(model, tt_data, val_size=.3, epochs=1, batch_size=16):
     y_val = training_labels[:vals]
     y_train = training_labels[vals:]
 
-    print(x_train.shape, x_val.shape)
     fit_model = model.fit(x_train, y_train, epochs=epochs, batch_size=batch_size, validation_data=(x_val, y_val),
                           verbose=1, shuffle=True)
     model_results = model.evaluate(testing_data, testing_labels)
