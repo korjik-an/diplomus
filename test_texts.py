@@ -7,6 +7,8 @@ from transformers import AutoTokenizer, TFAutoModel
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 import numpy as np
 import nltk
+from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
+from sklearn.metrics import classification_report
 
 from services.clean_text import clean_text
 from services.get_text_vector import get_text_vector
@@ -74,8 +76,10 @@ texts = []
 
 for folder, label in zip(data_folders, labels):
     files = os.listdir(folder)
-    for file in files:
-        with open(os.path.join(folder, file), 'r') as f:
+    for i, file in enumerate(files):
+        if i >= 500:  # берем только первые 10 текстов
+            break
+        with open(os.path.join(folder, file), 'r', encoding='utf-8') as f:
             text = f.read(1200)  # read only the first 1200 characters of the text file
             texts.append({'filename': file, 'text': text, 'label': label})
 
@@ -105,18 +109,50 @@ for text in df['text']:
     text_vector = get_text_vector(str(text))
     text_vectors.append(text_vector)
 
+#text_vectors = np.concatenate(text_vectors, axis=0)
+#print(text_vectors.shape)
+#text_vectors = text_vectors.reshape((-1, 1))
+#print(text_vectors.shape)
+
+#labels_array = np.array(df['label'].values)
+#print(labels_array.shape)
+
 text_vectors = np.concatenate(text_vectors, axis=0)
+text_vectors = text_vectors.reshape((-1, 1))
 
 labels_array = np.array(df['label'].values)
 
-train_ratio=0.95
-train_size = int(train_ratio * len(text_vectors))
+train_ratio = 0.95
+train_size = int(train_ratio * len(labels_array))
 
-train_text_vectors = text_vectors[:train_size]
-train_labels = labels_array[:train_size]
+combined = list(zip(text_vectors, labels_array))
+np.random.shuffle(combined)
+text_vectors_shuffled, labels_array_shuffled = zip(*combined)
 
-test_text_vectors = text_vectors[train_size:]
-test_labels = labels_array[train_size:]
+# Преобразуем обратно в массивы numpy
+text_vectors_shuffled = np.array(text_vectors_shuffled)
+labels_array_shuffled = np.array(labels_array_shuffled)
+
+train_text_vectors = text_vectors_shuffled[:train_size]
+train_labels = labels_array_shuffled[:train_size]
+train_labels = keras.utils.to_categorical(train_labels, num_classes=2)
+
+test_text_vectors = text_vectors_shuffled[train_size:]
+test_labels = labels_array_shuffled[train_size:]
+test_labels = keras.utils.to_categorical(test_labels, num_classes=2)
+
+test_text_vectors = test_text_vectors.reshape((-1, 1))
+print(test_labels.shape)
+print(test_text_vectors.shape)
+
+#train_ratio = 0.8
+#train_size = int(train_ratio * len(text_vectors))
+
+#train_text_vectors = text_vectors[:train_size]
+#train_labels = labels_array[:train_size]
+
+#test_text_vectors = text_vectors[train_size:]
+#test_labels = labels_array[train_size:]
 
 val_size = .3
 vals = int(len(train_text_vectors) * val_size)
@@ -128,29 +164,52 @@ y_val = train_labels[:vals]
 y_train = train_labels[vals:]
 
 
-text_vectors = text_vectors.reshape((-1, text_vectors.shape[1]))
+#text_vectors = text_vectors.reshape((-1, text_vectors.shape[1]))
+#text_vectors = text_vectors.reshape((1, -1))
+#print(text_vectors.shape)
+
 # Создаем модель на основе Keras
 text_input = layers.Input(shape=(text_vectors.shape[1],))
 
-text_branch = layers.Dense(64, activation='relu')(text_input)
+text_branch = layers.Dense(32, activation='relu')(text_input)
+text_branch = layers.Dense(16, activation='tanh')(text_branch)
 text_branch = layers.Dropout(0.5)(text_branch)
 
-output = layers.Dense(1, activation='sigmoid')(text_branch)
+output = layers.Dense(2, activation='softmax')(text_branch)
 
 model = keras.Model(inputs=text_input, outputs=output)
 
 # Компилируем модель
-model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy', ])
 
 # Тренируем модель
 model_res = model.fit(train_text_vectors, np.array(train_labels), epochs=10, batch_size=16)
 print(model_res.history)
 
 # Оценка модели на тестовых данных
-loss, accuracy = model.evaluate(test_text_vectors, test_labels)
+predictions = model.predict(test_text_vectors)
+predictions_rounded = predictions.round()
 
+loss, accuracy = model.evaluate(test_text_vectors, test_labels)
 print("Loss:", loss)
 print("Accuracy:", accuracy)
+
+if len(test_labels) == len(predictions_rounded):
+    precision = precision_score(test_labels, predictions_rounded, average='weighted')
+    recall = recall_score(test_labels, predictions_rounded, average='weighted')
+    f1 = f1_score(test_labels, predictions_rounded, average='weighted')
+    accuracy = accuracy_score(test_labels, predictions_rounded)
+else:
+    print("Error: Mismatch in array sizes.")
+    print(test_labels.shape)
+    print(test_text_vectors.shape)
+
+print("Precision:", precision)
+print("Recall:", recall)
+print("F1-score:", f1)
+print("Accuracy:", accuracy)
+
+
 
 # проверки
 # print(df.head())
